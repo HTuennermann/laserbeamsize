@@ -53,6 +53,9 @@ import matplotlib.cm
 import matplotlib.colors
 import scipy.ndimage
 from PIL import Image, ImageDraw
+import jax.numpy as jnp
+from jax import jit
+
 
 # cubeYF palette described at https://mycarta.wordpress.com
 # the default gist_ncar colormap works better for most beams
@@ -325,7 +328,7 @@ def rotate_image(original, x0, y0, phi):
     return s
 
 
-def basic_beam_size(image):
+def basic_beam_size_numpy(image):
     """
     Determine the beam center, diameters, and tilt using ISO 11146 standard.
 
@@ -390,6 +393,77 @@ def basic_beam_size(image):
     phi *= -1
 
     return xc, yc, dx, dy, phi
+
+@jit
+def jit_basic_beam_size(image, hh, vv):
+    """
+    Determine the beam center, diameters, and tilt using ISO 11146 standard.
+
+    Find the center and sizes of an elliptical spot in an 2D array.
+
+    The function does nothing to eliminate background noise.  It just finds the first
+    and second order moments and returns the beam parameters. Consequently
+    a beam spot in an image with a constant background will fail badly.
+
+    FWIW, this implementation is roughly 800X faster than one that finds
+    the moments using for loops.
+
+    The returned parameters are::
+
+        `xc`, `yc` is the center of the elliptical spot.
+
+        `dx`, `dy` is the semi-major/minor diameters of the elliptical spot.
+
+        `phi` is tilt of the ellipse from the axis [radians]
+
+    Args:
+        image: 2D array of image with beam spot
+    Returns:
+        beam parameters [xc, yc, dx, dy, phi]
+    """
+    
+
+    # total of all pixels
+    p = jnp.sum(image, dtype=float)     # float avoids integer overflow
+
+    # sometimes the image is all zeros, just return
+
+    # find the centroid
+
+    xc = jnp.sum(jnp.dot(image, hh)) / p
+    yc = jnp.sum(jnp.dot(image.T, vv)) / p
+
+    # find the variances
+    hs = hh - xc
+    vs = vv - yc
+    xx = jnp.sum(jnp.dot(image, hs**2)) / p
+    xy = jnp.dot(jnp.dot(image.T, vs), hs) / p
+    yy = jnp.sum(jnp.dot(image.T, vs**2)) / p
+
+    # Ensure that the case xx==yy is handled correctly
+    #if xx == yy:
+    #    disc = jnp.abs(2 * xy)
+    #    phi = jnp.sign(xy) * jnp.pi / 4
+    #else:
+    diff = xx - yy
+    disc = jnp.sign(diff) * jnp.sqrt(diff**2 + 4 * xy**2)
+    phi = 0.5 * jnp.arctan(2 * xy / diff)
+
+    # finally, the major and minor diameters
+    dx = jnp.sqrt(8 * (xx + yy + disc))
+    dy = jnp.sqrt(8 * (xx + yy - disc))
+
+    # phi is negative because image is inverted
+    phi *= -1
+
+    return xc, yc, dx, dy, phi
+
+def basic_beam_size(image):
+    v, h = image.shape
+    hh = jnp.arange(h, dtype=float)      # float avoids integer overflow
+    vv = jnp.arange(v, dtype=float)      # ditto
+
+    return jit_basic_beam_size(image, hh, vv)
 
 
 def elliptical_mask(image, xc, yc, dx, dy, phi):
