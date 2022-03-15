@@ -545,7 +545,7 @@ def perimeter_mask(image, corner_fraction=0.035):
     return the_mask
 
 
-def corner_background(image, corner_fraction=0.035):
+def corner_background_slow(image, corner_fraction=0.035):
     """
     Return mean and stdev of background in corners of image.
 
@@ -569,6 +569,20 @@ def corner_background(image, corner_fraction=0.035):
     mean = np.mean(img)
     stdev = np.std(img)
     return mean, stdev
+
+def corner_background(image, corner_fraction=0.035):
+
+    v, h = image.shape
+    n = int(v * corner_fraction)
+    m = int(h * corner_fraction)
+
+    the_mask = np.zeros([2*n, 2*m])
+    the_mask[:n, :m]  = image[:n, :m]
+    the_mask[:n, -m:] = image[:n, -m:]
+    the_mask[-n:, :m] = image[-n:, :m]
+    the_mask[-n:, -m:]=image[-n:, -m:]
+
+    return (np.mean(the_mask), np.std(the_mask))
 
 
 def corner_subtract(image, corner_fraction=0.035, nT=3):
